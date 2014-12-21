@@ -41,70 +41,69 @@ import inkex
 import os
 import sys
 import tempfile
-import subprocess
+from subprocess import Popen, PIPE
 from StringIO import StringIO
 import platform
 import logging
 
-log = os.path.join(os.path.expanduser('~'), 'eqtexsvg.log')
-logging.basicConfig(filename=log, 
+LOG = os.path.join(os.path.expanduser('~'), 'eqtexsvg.log')
+logging.basicConfig(filename=LOG,
                     level=logging.DEBUG,
                     filemode='w',
                     datefmt='%d/%m/%Y %H:%M:%S',
-                    format= "%(asctime)s: %(message)s")
+                    format="%(asctime)s: %(message)s")
 
 
 def exec_cmd(cmd_line=None, debug=True):
     """Launch given command line (and report in log if debug)"""
-    
-    rm = lambda x: '\n'.join([l for l in x.split('\n') if l != ""])
 
-    p = subprocess.Popen(cmd_line, shell=True,
-                                   stdin=subprocess.PIPE,
-                                   stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE)
+    clean = lambda x: '\n'.join([l for l in x.split('\n') if l != ""])
 
-    (std_out, std_err) = p.communicate()
-    std_out = rm(std_out)
-    std_err = rm(std_err)
+    process = Popen(cmd_line, shell=True, stdin=PIPE, stdout=PIPE, stderr=PIPE)
+
+    (std_out, std_err) = process.communicate()
+    std_out = clean(std_out)
+    std_err = clean(std_err)
 
     if debug:
         logging.debug(cmd_line)
-        logging.debug('returncode: '+str(p.returncode))
-        logging.debug('stderr:\n'+std_err)
-        logging.debug('stdout:\n'+std_out)
+        logging.debug('returncode: ' + str(process.returncode))
+        logging.debug('stderr:\n' + std_err)
+        logging.debug('stdout:\n' + std_out)
 
-    return (p.returncode, std_out, std_err)
+    return (process.returncode, std_out, std_err)
 
 
 class Equation:
     """Current LaTeX Equation"""
 
-    def __init__(self, param={}):
-        
+    def __init__(self, param=None):
+
+        param = param or {}
         self.document = None
         self.formula = None
         self.temp_dir = None
+        self.header = None
         self.debug = False
-        
-        if param.has_key('debug'):
+
+        if 'debug' in param:
             self.debug = param['debug']
 
         inkscape_version = exec_cmd('inkscape -V', False)[1]
-        
+
         if self.debug:
             logging.debug(inkscape_version)
-            ## get Python informations system, release and machine informations
-            
-            logging.debug("Python %s\nCompiler: %s\nBuild   : %s" %(
-                                                    platform.python_version(),
-                                                    platform.python_compiler(),
-                                            ' '.join(platform.python_build())))
-            logging.debug("Platform: %s" %(platform.platform()))
-            logging.debug("Current Working Directory: %s" %(os.getcwd()))
-            logging.debug("Current Extension Directory: %s" %(
-                                                    os.path.abspath(__file__)))
-        try: 
+            # get Python informations system, release and machine informations
+
+            logging.debug("Python %s\nCompiler: %s\nBuild   : %s" % (
+                platform.python_version(),
+                platform.python_compiler(),
+                ' '.join(platform.python_build())))
+            logging.debug("Platform: %s" % (platform.platform()))
+            logging.debug("Current Working Directory: %s" % (os.getcwd()))
+            logging.debug("Current Extension Directory: %s" % (
+                os.path.abspath(__file__)))
+        try:
             self.temp_dir = tempfile.mkdtemp('', 'inkscape-')
             if self.debug:
                 logging.debug(self.temp_dir)
@@ -112,11 +111,11 @@ class Equation:
             if self.debug:
                 logging.debug('Temporary directory cannot be created')
             sys.exit('Temporary directory cannot be created')
-            
-        if param.has_key('document'):
+
+        if 'document' in param:
             self.document = param['document']
 
-        if param.has_key('formula'):
+        if 'formula' in param:
             self.formula = param['formula']
             if self.debug:
                 logging.debug(self.formula)
@@ -125,7 +124,7 @@ class Equation:
                 logging.debug('No formula detected')
             sys.exit('Without formula, no equation will be generated')
 
-        if param.has_key('packages'):
+        if 'packages' in param:
             self.pkgstring = param['packages']
         else:
             self.pkgstring = ""
@@ -135,65 +134,62 @@ class Equation:
         self.file = 'eq'
         self.svg = None
         self.file_tex = os.path.join(self.temp_dir, self.file + '.tex')
-        self.file_ps  = os.path.join(self.temp_dir, self.file + '.ps')
+        self.file_ps = os.path.join(self.temp_dir, self.file + '.ps')
         self.file_dvi = os.path.join(self.temp_dir, self.file + '.dvi')
         self.file_svg = os.path.join(self.temp_dir, self.file + '.svg')
         self.file_out = os.path.join(self.temp_dir, self.file + '.out')
         self.file_err = os.path.join(self.temp_dir, self.file + '.err')
-        
-        self.latex    = False
-        self.dvips    = False
-        self.pstoedit = False
-        self.dvisvgm  = False
-        self.process  = True
 
+        self.latex = False
+        self.dvips = False
+        self.pstoedit = False
+        self.dvisvgm = False
+        self.process = True
 
     def path_programs(self, cmd_line=None, code=True):
         """Try to launch given command line with pass return code"""
-        
-        ## convention ==0 : True, !=0 : False
-        ## 'latex --version' ==0
-        ## 'dvips -v'  !=0
-        ## 'pstoedit -v' !=0
-        ## 'dvisvgm -V' ==0
-        
+
+        # convention ==0 : True, !=0 : False
+        # 'latex --version' ==0
+        # 'dvips -v'  !=0
+        # 'pstoedit -v' !=0
+        # 'dvisvgm -V' ==0
+
         program_name = cmd_line.split()[0]
 
         try:
             retcode = exec_cmd(cmd_line, self.debug)[0]
 
-            if ((retcode==0) if code else retcode):
-                exec('self.'+program_name+' = True')
+            if ((retcode == 0) if code else retcode):
+                exec('self.' + program_name + ' = True')
                 if self.debug:
                     logging.debug(program_name + " OK")
             else:
-                exec('self.'+program_name+' = False')
+                exec('self.' + program_name + ' = False')
                 if self.debug:
                     logging.debug(program_name + " not OK")
 
-        except OSError, e:
+        except OSError, err:
             if self.debug:
-                logging.debug(program_name + " failed: " + e)
-            sys.stderr.write(program_name + " failed:" + e)
+                logging.debug(program_name + " failed: " + err)
+            sys.stderr.write(program_name + " failed:" + err)
             sys.exit(1)
-
 
     def parse_pkgs(self):
         """Add custom packages to TeX source"""
-        
+
+        header = ""
         if self.pkgstring != "":
-            pkglist = self.pkgstring.replace(" ","").split(",")
-            header = ""
+            pkglist = self.pkgstring.replace(" ", "").split(",")
             for pkg in pkglist:
                 header += "\\usepackage{%s}\n" % pkg
             self.header = header
             if self.debug:
-                logging.debug('packages:\n'+self.header)
+                logging.debug('packages:\n' + self.header)
         else:
             self.header = ""
             if self.debug:
                 logging.debug('No package')
-
 
     def generate_tex(self):
         """Generate the LaTeX Equation file"""
@@ -208,66 +204,64 @@ class Equation:
         texstring += self.header
         texstring += "\\thispagestyle{empty}\n"
         texstring += "\\begin{document}\n"
-        ##Todo1: Check the argument carefully, especially Math delimiters
-        ## delimiters : ('$','$')('$$','$$')('\(','\)')('\[','\]')
-        ##              ('\begin{equation*}', '\end{equation*}')
-        ##              ('\begin{equation}', '\end{equation}')
-        ##              ('\begin{math}', '\end{math}')
-        ##              ('\begin{displaymath}', '\end{displaymath}')
-        ##              ...
+        # Todo1: Check the argument carefully, especially Math delimiters
+        #  delimiters : ('$','$')('$$','$$')('\(','\)')('\[','\]')
+        #               ('\begin{equation*}', '\end{equation*}')
+        #               ('\begin{equation}', '\end{equation}')
+        #               ('\begin{math}', '\end{math}')
+        #               ('\begin{displaymath}', '\end{displaymath}')
+        #               ...
         texstring += self.formula
         texstring += "\n\\end{document}\n"
 
         if self.debug:
-            logging.debug('\n'+texstring)
-        
+            logging.debug('\n' + texstring)
+
         try:
-            tex = open(self.file_tex,'w')
+            tex = open(self.file_tex, 'w')
             tex.write(texstring)
             tex.close()
             if self.debug:
                 logging.debug('TEX file generated')
-        except:
+        except IOError:
             if self.debug:
                 logging.debug('TEX file not generated')
-
 
     def generate_dvi(self):
         """Generate the DVI Equation file"""
 
-        cmd_line  = 'latex '
-        cmd_line += '-output-directory="%s"' %(self.temp_dir)
+        cmd_line = 'latex '
+        cmd_line += '-output-directory="%s"' % (self.temp_dir)
         cmd_line += ' -halt-on-error '
-        cmd_line += "%s "    %(self.file_tex)
+        cmd_line += "%s " % (self.file_tex)
 
-        retcode, std_out, std_err = exec_cmd(cmd_line, self.debug)
+        retcode = exec_cmd(cmd_line, self.debug) [0]
 
         if retcode:
             if self.debug:
-                logging.debug('DVI file not generated with latex')           
+                logging.debug('DVI file not generated with latex')
             sys.exit('Problem to generate DVI file')
         else:
             if self.debug:
                 logging.debug('DVI file generated with latex')
 
-
     def generate_svg(self):
         """Generate the SVG Equation string/file"""
 
         if self.process:
-            ## Use dvisvgm
+            # Use dvisvgm
             cmd_line = 'dvisvgm '
-            cmd_line += '-v0 '         ## set verbosity level to 0
-            cmd_line += '-a '          ## trace all glyphs of bitmap fonts
-            cmd_line += '-n '          ## draw glyphs by using path elements
-            cmd_line += '-s '          ## write SVG output to stdout
-            cmd_line += '"%s"' %(self.file_dvi)       ## Input file
+            cmd_line += '-v0 '         # set verbosity level to 0
+            cmd_line += '-a '          # trace all glyphs of bitmap fonts
+            cmd_line += '-n '          # draw glyphs by using path elements
+            cmd_line += '-s '          # write SVG output to stdout
+            cmd_line += '"%s"' % (self.file_dvi)   # Input file
 
             retcode, std_out, std_err = exec_cmd(cmd_line, self.debug)
-            ## Get SVG from dvisvgm output
+            # Get SVG from dvisvgm output
             self.svg = std_out
 
-            if not retcode: 
+            if not retcode:
                 if self.debug:
                     logging.debug('SVG file generated with dvisvgm')
             else:
@@ -275,19 +269,19 @@ class Equation:
                     logging.debug('SVG file not generated with dvisvgm')
                 sys.exit('SVG file not generated with dvisvgm')
         else:
-            ## Use dvips to produce PS file
-            cmd_line  = 'dvips '
-            cmd_line += '-q '          ## Run quietly
-            cmd_line += '-f '          ## Run as filter
-            cmd_line += '-E '          ## Try to create EPSF
-            cmd_line += '-D 600 '      ## Resolution
-##             cmd_line += '-y 1000 '     ## Multiply by dvi magnification
-            cmd_line += '-o "%s" ' % (self.file_ps)   ## Output file
-            cmd_line += '"%s"'     % (self.file_dvi)  ## Input file
-            
+            # Use dvips to produce PS file
+            cmd_line = 'dvips '
+            cmd_line += '-q '          # Run quietly
+            cmd_line += '-f '          # Run as filter
+            cmd_line += '-E '          # Try to create EPSF
+            cmd_line += '-D 600 '      # Resolution
+#              cmd_line += '-y 1000 '     # Multiply by dvi magnification
+            cmd_line += '-o "%s" ' % (self.file_ps)   # Output file
+            cmd_line += '"%s"' % (self.file_dvi)  # Input file
+
             retcode, std_out, std_err = exec_cmd(cmd_line, self.debug)
-            
-            if not retcode: 
+
+            if not retcode:
                 if self.debug:
                     logging.debug('PS file generated with dvips')
             else:
@@ -295,19 +289,19 @@ class Equation:
                     logging.debug('PS file not generated with dvips')
                 sys.exit('PS file not generated with dvips')
 
-            ## Use pstoedit to produce SVG file
-            cmd_line  = 'pstoedit '
-            cmd_line += '-f plot-svg ' ## svg via GNU libplot
-            cmd_line += '-dt '         ## convert text to polygons
-            cmd_line += '-ssp '        ## simulate subpaths
-##            cmd_line += '-quiet '      ## quiet mode
-            cmd_line += '"%s" '   %(self.file_ps)     ## Input file
-            
+            # Use pstoedit to produce SVG file
+            cmd_line = 'pstoedit '
+            cmd_line += '-f plot-svg '  # svg via GNU libplot
+            cmd_line += '-dt '          # convert text to polygons
+            cmd_line += '-ssp '         # simulate subpaths
+#             cmd_line += '-quiet '      # quiet mode
+            cmd_line += '"%s" ' % (self.file_ps)     # Input file
+
             retcode, std_out, std_err = exec_cmd(cmd_line, self.debug)
-            ## Get SVG from pstoedit output
+            # Get SVG from pstoedit output
             self.svg = std_out
-            
-            if not retcode: 
+
+            if not retcode:
                 if self.debug:
                     logging.debug('SVG file generated with pstoedit')
             else:
@@ -315,63 +309,61 @@ class Equation:
                     logging.debug('SVG file not generated with pstoedit')
                 sys.exit('SVG file not generated with pstoedit')
 
-
     def import_svg(self):
         """Import the SVG Equation file into Current layer"""
 
         svg_uri = inkex.NSS['svg']
         xlink_uri = inkex.NSS['xlink']
-        
+
         if self.debug:
-            logging.debug('import_svg():\n'+self.svg+'\n')
+            logging.debug('import_svg():\n' + self.svg + '\n')
         try:
-            ## parsing self.svg from file:
+            # parsing self.svg from file:
             tree = inkex.etree.parse(StringIO(self.svg))
             eq_tree = tree.getroot()
             if self.debug:
                 logging.debug('SVG file imported from parse')
-        except:
+        except Exception:
             if self.debug:
                 logging.debug('SVG file not imported')
             sys.exit('Problem to import svg string/file')
 
         # Collect document ids
         doc_ids = {}
-        docIdNodes = self.document.xpath('//@id')
+        doc_id_nodes = self.document.xpath('//@id')
 
-        for m in docIdNodes:
-            doc_ids[m] = 1
+        for id_nodes in doc_id_nodes:
+            doc_ids[id_nodes] = 1
 
-        name  = 'equation_00'
+        name = 'equation_00'
 
         # Make sure that the id/name is unique
         index = 0
-        while (doc_ids.has_key(name)):
-            name = 'equation_%02d' %(index)
+        while name in doc_ids:
+            name = 'equation_%02d' % index
             index = index + 1
 
         # Create new group node containing the equation
-        eqn = inkex.etree.Element('{%s}%s' % (svg_uri,'g'))
+        eqn = inkex.etree.Element('{%s}%s' % (svg_uri, 'g'))
         eqn.set('id', name)
         eqn.set('style', 'fill: black;')
         eqn.set('title', str(self.formula))
-        
 
         if not self.process:
-            ## Apply transform to pstoedit result
+            # Apply transform to pstoedit result
             doc_width = inkex.unittouu(self.document.getroot().get('width'))
             doc_height = inkex.unittouu(self.document.getroot().get('height'))
-            doc_sizeH = min(doc_width,doc_height)
-            doc_sizeW = max(doc_width,doc_height)
-                                                     
-            matrix_transform = 'matrix(1,0,0,-1,%f,%f)' %(-doc_sizeH*0.2,
-                                                          doc_sizeW*0.65)
+            doc_sizeH = min(doc_width, doc_height)
+            doc_sizeW = max(doc_width, doc_height)
+
+            matrix_transform = 'matrix(1,0,0,-1,%f,%f)' % (-doc_sizeH * 0.2,
+                                                           doc_sizeW * 0.65)
             if self.debug:
                 logging.debug('Dimensions:\n'
-                                +'  W:'+str(doc_width)
-                                +'  H:'+str(doc_height)
-                                +' sH:'+str(doc_sizeH)
-                                +' sW:'+str(doc_sizeW))
+                              + '  W:' + str(doc_width)
+                              + '  H:' + str(doc_height)
+                              + ' sH:' + str(doc_sizeH)
+                              + ' sW:' + str(doc_sizeW))
                 logging.debug('Applying matrix: '+matrix_transform)
             eqn.set('transform', matrix_transform)
 
@@ -381,11 +373,10 @@ class Equation:
         # Get the Ids from <defs/>
         # And make unique Ids from name and counter
         for elt in eq_tree:
-            if elt.tag == ('{%s}%s' % (svg_uri,'defs')):
+            if elt.tag == ('{%s}%s' % (svg_uri, 'defs')):
                 for subelt in elt:
                     dic[subelt.get('id')] = "%s_%02d" % (name, counter)
                     counter += 1
-
 
         # Build new equation nodes
         for elt in eq_tree:
@@ -397,14 +388,13 @@ class Equation:
                 for key in subelt.keys():
                     eqn_subelt.set(key, subelt.attrib[key])
                 if 'id' in subelt.attrib:
-                    eqn_subelt.set('id', dic[subelt.get('id')])                    
-                xlink = '{%s}%s' % (xlink_uri,'href')
+                    eqn_subelt.set('id', dic[subelt.get('id')])
+                xlink = '{%s}%s' % (xlink_uri, 'href')
                 if xlink in subelt.attrib:
-                    eqn_subelt.set(xlink, 
-                                   '#'+dic[subelt.get(xlink).split("#")[-1]])
+                    eqn_subelt.set(xlink,
+                                   '#' + dic[subelt.get(xlink).split("#")[-1]])
 
         self.svg = eqn
-
 
     def clean(self):
         """Clean all necessary file"""
@@ -413,18 +403,17 @@ class Equation:
             try:
                 os.unlink(os.path.join(self.temp_dir, self.file + ext))
                 if self.debug:
-                    logging.debug(self.file+ext+' file deleted')
-            except:
+                    logging.debug(self.file + ext + ' file deleted')
+            except OSError:
                 if self.debug:
-                    logging.debug(self.file+ext+' file not deleted')
+                    logging.debug(self.file + ext + ' file not deleted')
         try:
             os.rmdir(self.temp_dir)
             if self.debug:
-                logging.debug(self.temp_dir+' is removed')
-        except:
+                logging.debug(self.temp_dir + ' is removed')
+        except OSError:
             if self.debug:
-                logging.debug(self.temp_dir+'cannot be removed')
-
+                logging.debug(self.temp_dir + 'cannot be removed')
 
     def generate(self):
         """Generate SVG from LaTeX equation file"""
@@ -437,7 +426,7 @@ class Equation:
         self.generate_tex()
         self.generate_dvi()
 
-        if self.latex and self.dvisvgm:# and False:
+        if self.latex and self.dvisvgm:  # and False:
             self.process = True
             if self.debug:
                 logging.debug('latex and dvisvgm process in use')
@@ -453,7 +442,7 @@ class Equation:
         self.generate_svg()
         self.import_svg()
         self.clean()
-        
+
         return self.svg
 
 
@@ -461,37 +450,36 @@ class InsertEquation(inkex.Effect):
     """Insert LaTeX Equation into the current Inscape instance"""
 
     def __init__(self):
-        
-        f='$\lim_{n \\to \infty}\sum_{k=1}^n \\frac{1}{k^2}= \\frac{\pi^2}{6}$'
+
+        formula = '\(\displaystyle\lim_{n\\to \infty}\sum_{k=1}^n\\frac{1}{k^2}' \
+                  + '=\\frac{\pi^2}{6}\)'
 
         inkex.Effect.__init__(self)
-        self.OptionParser.add_option('-f', '--formule',
-                        action='store', type='string', 
-                        dest='formula', help='LaTeX formula',
-                        default=f,)
-        self.OptionParser.add_option("-p", "--packages",
-                        action="store", type="string", 
-                        dest="packages", help="Additional packages", 
-                        default="",)
-        self.OptionParser.add_option("-d", "--debug",
-                        action="store", type="inkbool", 
-                        dest="debug", help="Debug information",
-                        default=False,)
+        self.OptionParser.add_option(
+            '-f', '--formule', action='store', type='string',
+            dest='formula', help='LaTeX formula', default=formula,)
+        self.OptionParser.add_option(
+            "-p", "--packages", action="store", type="string",
+            dest="packages", help="Additional packages", default="",)
+        self.OptionParser.add_option(
+            "-d", "--debug", action="store", type="inkbool",
+            dest="debug", help="Debug information", default=False,)
 
     def effect(self):
+        """Generate inline Equation"""
         equation = Equation({
-                            'formula'  : self.options.formula,
-                            'document' : self.document,
-                            'packages' : self.options.packages,
-                            'debug'    : self.options.debug,
-                            })
+            'formula':  self.options.formula,
+            'document': self.document,
+            'packages': self.options.packages,
+            'debug':    self.options.debug,
+        })
 
         debug = self.options.debug
-        
-        eq = equation.generate()
 
-        if eq != None :
-            self.current_layer.append(eq)
+        current_eq = equation.generate()
+
+        if current_eq != None:
+            self.current_layer.append(current_eq)
             if debug:
                 logging.debug('Equation added to current layer')
         else:
@@ -501,5 +489,5 @@ class InsertEquation(inkex.Effect):
 
 
 if __name__ == "__main__":
-    e = InsertEquation()
-    e.affect()
+    EFFECT = InsertEquation()
+    EFFECT.affect()
