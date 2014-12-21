@@ -14,7 +14,8 @@ Depending on which program you prefer:
 Recent version can be downloaded via :
  http://www.julienvitard.eu/
 
-Copyright (C) 2006 - 2011 Julien Vitard, eqtexsvg@gmail.com
+Copyright (C) 2006 - 2014 Julien Vitard, eqtexsvg@gmail.com
+ * 2014-12-21: add command line capabilities
  * 2011-05-17: changes pstoedit option -quiet
  * 2011-05-16: inx file modification
  * 2011-05-15: uname replacement by platform
@@ -37,14 +38,9 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 """
 
-import inkex
 import os
-import sys
-import tempfile
-from subprocess import Popen, PIPE
-from StringIO import StringIO
-import platform
 import logging
+import optparse
 
 LOG = os.path.join(os.path.expanduser('~'), 'eqtexsvg.log')
 logging.basicConfig(filename=LOG,
@@ -52,6 +48,32 @@ logging.basicConfig(filename=LOG,
                     filemode='w',
                     datefmt='%d/%m/%Y %H:%M:%S',
                     format="%(asctime)s: %(message)s")
+
+try:
+    import inkex
+    STANDALONE = False
+except ImportError:
+    STANDALONE = True
+
+    class inkex:
+        class Effect:
+            current_layer = []
+
+            def __init__(self):
+                self.OptionParser = optparse.OptionParser()
+
+            def affect(self):
+                (self.options, self.args) = self.OptionParser.parse_args()
+                self.effect()
+
+        def debug(self, *args, **kwargs):
+            pass
+
+import sys
+import tempfile
+from subprocess import Popen, PIPE
+from StringIO import StringIO
+import platform
 
 
 def exec_cmd(cmd_line=None, debug=True):
@@ -85,6 +107,7 @@ class Equation:
         self.temp_dir = None
         self.header = None
         self.debug = False
+        self.output = param['output']
 
         if 'debug' in param:
             self.debug = param['debug']
@@ -182,14 +205,16 @@ class Equation:
         if self.pkgstring != "":
             pkglist = self.pkgstring.replace(" ", "").split(",")
             for pkg in pkglist:
-                header += "\\usepackage{%s}\n" % pkg
-            self.header = header
-            if self.debug:
-                logging.debug('packages:\n' + self.header)
+                if pkg:
+                    header += "\\usepackage{%s}\n" % pkg
         else:
-            self.header = ""
             if self.debug:
                 logging.debug('No package')
+
+        self.header = header
+
+        if self.debug:
+            logging.debug('packages:\n' + self.header)
 
     def generate_tex(self):
         """Generate the LaTeX Equation file"""
@@ -235,7 +260,7 @@ class Equation:
         cmd_line += ' -halt-on-error '
         cmd_line += "%s " % (self.file_tex)
 
-        retcode = exec_cmd(cmd_line, self.debug) [0]
+        retcode = exec_cmd(cmd_line, self.debug)[0]
 
         if retcode:
             if self.debug:
@@ -364,7 +389,7 @@ class Equation:
                               + '  H:' + str(doc_height)
                               + ' sH:' + str(doc_sizeH)
                               + ' sW:' + str(doc_sizeW))
-                logging.debug('Applying matrix: '+matrix_transform)
+                logging.debug('Applying matrix: ' + matrix_transform)
             eqn.set('transform', matrix_transform)
 
         dic = {}
@@ -415,7 +440,7 @@ class Equation:
             if self.debug:
                 logging.debug(self.temp_dir + 'cannot be removed')
 
-    def generate(self):
+    def generate(self, standalone=False):
         """Generate SVG from LaTeX equation file"""
 
         self.path_programs('latex --version', True)
@@ -440,7 +465,12 @@ class Equation:
             sys.exit('No process in use!')
 
         self.generate_svg()
-        self.import_svg()
+
+        if standalone:
+            with open(self.output, "w") as svg_file:
+                svg_file.write(self.svg)
+        else:
+            self.import_svg()
         self.clean()
 
         return self.svg
@@ -451,32 +481,51 @@ class InsertEquation(inkex.Effect):
 
     def __init__(self):
 
-        formula = '\(\displaystyle\lim_{n\\to \infty}\sum_{k=1}^n\\frac{1}{k^2}' \
+        formula = '\(\displaystyle \lim_{n\\to \infty}\sum_{k=1}^n\\frac{1}{k^2}' \
                   + '=\\frac{\pi^2}{6}\)'
 
         inkex.Effect.__init__(self)
+
         self.OptionParser.add_option(
             '-f', '--formule', action='store', type='string',
             dest='formula', help='LaTeX formula', default=formula,)
+
         self.OptionParser.add_option(
             "-p", "--packages", action="store", type="string",
             dest="packages", help="Additional packages", default="",)
+
         self.OptionParser.add_option(
-            "-d", "--debug", action="store", type="inkbool",
-            dest="debug", help="Debug information", default=False,)
+            "-o", "--output", action="store",
+            dest="output", help="output file", default="output.svg",)
+
+        if STANDALONE:
+            self.OptionParser.add_option(
+                "-d", "--debug", action="store_true",
+                dest="debug", help="Debug information", default=False,)
+        else:
+            self.OptionParser.add_option(
+                "-d", "--debug", action="store", type="inkbool",
+                dest="debug", help="Debug information", default=False,)
 
     def effect(self):
         """Generate inline Equation"""
-        equation = Equation({
+
+        param = {
             'formula':  self.options.formula,
-            'document': self.document,
+            'document': getattr(self, 'document', None),
             'packages': self.options.packages,
             'debug':    self.options.debug,
-        })
+            'output':   self.options.output,
+        }
 
         debug = self.options.debug
 
-        current_eq = equation.generate()
+        if debug:
+            logging.debug("Standalone Mode")
+
+        equation = Equation(param=param)
+
+        current_eq = equation.generate(standalone=STANDALONE)
 
         if current_eq != None:
             self.current_layer.append(current_eq)
