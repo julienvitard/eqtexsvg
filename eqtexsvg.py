@@ -15,6 +15,7 @@ Recent version can be downloaded via :
  http://www.julienvitard.eu/
 
 Copyright (C) 2006 - 2014 Julien Vitard, eqtexsvg@gmail.com
+ * 2015-02-25: fix Windows compatibility
  * 2014-12-21: add command line capabilities
  * 2011-05-17: changes pstoedit option -quiet
  * 2011-05-16: inx file modification
@@ -156,12 +157,13 @@ class Equation:
 
         self.file = 'eq'
         self.svg = None
-        self.file_tex = os.path.join(self.temp_dir, self.file + '.tex')
-        self.file_ps = os.path.join(self.temp_dir, self.file + '.ps')
-        self.file_dvi = os.path.join(self.temp_dir, self.file + '.dvi')
-        self.file_svg = os.path.join(self.temp_dir, self.file + '.svg')
-        self.file_out = os.path.join(self.temp_dir, self.file + '.out')
-        self.file_err = os.path.join(self.temp_dir, self.file + '.err')
+        os.chdir(self.temp_dir)
+        self.file_tex = self.file + '.tex'
+        self.file_ps = self.file + '.ps'
+        self.file_dvi = self.file + '.dvi'
+        self.file_svg = self.file + '.svg'
+        self.file_out = self.file + '.out'
+        self.file_err = self.file + '.err'
 
         self.latex = False
         self.dvips = False
@@ -258,7 +260,7 @@ class Equation:
         cmd_line = 'latex '
         cmd_line += '-output-directory="%s"' % (self.temp_dir)
         cmd_line += ' -halt-on-error '
-        cmd_line += "%s " % (self.file_tex)
+        cmd_line += '"%s"' % (self.file_tex)
 
         retcode = exec_cmd(cmd_line, self.debug)[0]
 
